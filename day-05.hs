@@ -43,6 +43,6 @@ main :: IO ()
 main = do
   s <- readFile "day-05.input"
   let input =  unpack $ strip $ pack s
-  let units = unitTypes input
   print $ lengthAfterReactions input
+  let units = unitTypes input
   print $ minimum (map (lengthAfterReactions . (polymerWithoutUnit input)) units)
