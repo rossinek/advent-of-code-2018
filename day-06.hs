@@ -28,26 +28,22 @@ minUniqueDistanceMap w h places = placesMap w h (\place -> onlyOne (argmins (dis
 totalDistanceMap :: Int -> Int -> [Place] -> Board Int
 totalDistanceMap w h places = placesMap w h (\place -> sum (map (distance place) places)) places
 
-hasClosedArea :: Board (Maybe Place) -> Place -> Bool
-hasClosedArea board place = not (any (\b -> (board Map.! b) == Just place) border)
-  where
-    left = minimum (map fst (Map.keys board))
-    top = minimum (map snd (Map.keys board))
-    width = maximum (map fst (Map.keys board))
-    height = maximum (map snd (Map.keys board))
-    border =
-      [(x, top) | x <- [0..width]] ++
-      [(x, height) | x <- [0..width]] ++
-      [(left, y) | y <- [1..(height-1)]] ++
-      [(width, y) | y <- [1..(height-1)]]
-
 maxClosedArea :: Board (Maybe Place) -> [Place] -> Maybe Int
 maxClosedArea board [] = Nothing
 maxClosedArea board places = if length placesWithClosedArea > 0
   then Just (maximum (map (\place -> length (filter (== place) (Map.elems board))) placesWithClosedArea))
   else Nothing
   where
-    placesWithClosedArea = map Just (filter (hasClosedArea board) places)
+    placesWithClosedArea = map Just (filter hasClosedArea places)
+    (l, t) = (minimum (map fst (Map.keys board)), minimum (map snd (Map.keys board)))
+    (w, h) = (maximum (map fst (Map.keys board)), maximum (map snd (Map.keys board)))
+    border =
+      [(x, t) | x <- [0..w]] ++
+      [(x, h) | x <- [0..w]] ++
+      [(l, y) | y <- [1..(h-1)]] ++
+      [(w, y) | y <- [1..(h-1)]]
+    hasClosedArea :: Place -> Bool
+    hasClosedArea place = not (any (\b -> (board Map.! b) == Just place) border)
 
 main :: IO ()
 main = do
