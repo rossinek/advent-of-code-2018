@@ -2,24 +2,41 @@ import System.Environment
 
 type Licence = [Int]
 type Metadata = [Int]
+data LicenceTree a = LicenceNode a [LicenceTree a]
 
 parseInput :: String -> Licence
 parseInput s = map read (words s)
 
-totalMetadata :: Licence -> Int
-totalMetadata (nnodes:nmeta:tail) = fst (addNodeMeta nnodes nmeta tail)
 
-addNodeMeta :: Int -> Int -> Licence -> (Int, Licence)
-addNodeMeta 0 nmeta licence = (sum meta, rest)
+constructTree :: Licence -> LicenceTree Metadata
+constructTree licence = fst (consumeNode licence)
+
+consumeNode :: Licence -> (LicenceTree Metadata, Licence)
+consumeNode (n:m:rest) = (LicenceNode (take m nextRest) children, drop m nextRest)
   where
-    (meta, rest) = splitAt nmeta licence
-addNodeMeta nnodes nmeta (n:m:tail) = (childSum + restTotal, nextRest)
+    (children, nextRest) = consumeNodes n rest
+
+consumeNodes :: Int -> Licence -> ([LicenceTree Metadata], Licence)
+consumeNodes 0 l = ([], l)
+consumeNodes n l = ((child:nextChildren), nextRest)
   where
-    (childSum, rest) = addNodeMeta n m tail
-    (restTotal, nextRest) = addNodeMeta (nnodes-1) nmeta rest
+    (child, rest) = consumeNode l
+    (nextChildren, nextRest) = consumeNodes (n-1) rest
+
+totalMetadataOnTree :: LicenceTree Metadata -> Int
+totalMetadataOnTree (LicenceNode meta children) = (sum meta) + (sum (map totalMetadataOnTree children))
+
+nodeValue :: LicenceTree Metadata -> Int
+nodeValue (LicenceNode meta []) = sum meta
+nodeValue (LicenceNode meta children) = sum $ map metaToValue meta
+  where
+    metaToValue :: Int -> Int
+    metaToValue m = if length children >= m then nodeValue (children !! (m-1)) else 0
 
 main :: IO ()
 main = do
   s <- readFile "day-08.input"
   let input = parseInput s
-  print $ totalMetadata input
+  let tree = constructTree input
+  print $ totalMetadataOnTree tree
+  print $ nodeValue tree
