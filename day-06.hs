@@ -47,7 +47,7 @@ maxClosedArea board places = if length placesWithClosedArea > 0
 
 main :: IO ()
 main = do
-  s <- readFile "day-06.input"
+  s <- readFile "input/day-06.input"
   let places = map parsePlace (lines s)
   let width = maximum (map fst places)
   let height = maximum (map snd places)

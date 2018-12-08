@@ -70,7 +70,7 @@ constructTimeline tasksWithDeps w = tick w ([], [], tasksWithDeps)
 
 main :: IO ()
 main = do
-  s <- readFile "day-07.input"
+  s <- readFile "input/day-07.input"
   let dependencies = map parseDependency (lines s)
   let tasks = (Set.toList . Set.fromList) (map fst dependencies ++ map snd dependencies)
   print $ tasksOrder dependencies tasks

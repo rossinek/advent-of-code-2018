@@ -7,7 +7,6 @@ data LicenceTree a = LicenceNode a [LicenceTree a]
 parseInput :: String -> Licence
 parseInput s = map read (words s)
 
-
 constructTree :: Licence -> LicenceTree Metadata
 constructTree licence = fst (consumeNode licence)
 
@@ -35,7 +34,7 @@ nodeValue (LicenceNode meta children) = sum $ map metaToValue meta
 
 main :: IO ()
 main = do
-  s <- readFile "day-08.input"
+  s <- readFile "input/day-08.input"
   let input = parseInput s
   let tree = constructTree input
   print $ totalMetadataOnTree tree

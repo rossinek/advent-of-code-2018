@@ -41,7 +41,7 @@ polymerWithoutUnit (h:tail) c = if (typeOf h == c)
 
 main :: IO ()
 main = do
-  s <- readFile "day-05.input"
+  s <- readFile "input/day-05.input"
   let input =  unpack $ strip $ pack s
   print $ lengthAfterReactions input
   let units = unitTypes input
