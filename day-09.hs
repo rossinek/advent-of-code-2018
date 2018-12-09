@@ -1,19 +1,22 @@
 import System.Environment
-import Data.CircularList
-import Data.Maybe (fromJust)
+import Helpers.Circle
 
-parseInput :: String -> (Int, Int)
+
+type Gameplay = Players -> Turn
+type Players = Int
+type Turn = (MarblesCircle, ScoresCircle)
+type ScoresCircle = Circle Score
+type Score = Int
+type Marble = Int
+type MarblesCircle = Circle Marble
+
+parseInput :: String -> (Players, Marble)
 parseInput s = (players, lastMarble)
   where
     players = read ((words s) !! 0)
     lastMarble = read ((words s) !! 6)
 
-type Gameplay = Int -> Turn
-type Turn = (Marbles, Scores)
-type Scores = CList Int
-type Marbles = CList Int
-
-gameplayFor :: Int -> Gameplay
+gameplayFor :: Players -> Gameplay
 gameplayFor nplayers = gameplay
   where
     gameplay :: Gameplay
@@ -21,18 +24,18 @@ gameplayFor nplayers = gameplay
                 | (n `mod` 23) == 0 = specialMove n (gameplay (n-1))
                 | otherwise         = standardMove n (gameplay (n-1))
 
-    standardMove :: Int -> Turn -> Turn
-    standardMove n (marbles, scores) = (insertL n (rotR marbles), rotR scores)
+    standardMove :: Marble -> Turn -> Turn
+    standardMove n (marbles, scores) = (insertAfter n (rotateRight marbles), rotateRight scores)
 
-    specialMove :: Int -> Turn -> Turn
-    specialMove n (marbles, scores) = (newMarbles, rotR (update newScore scores))
+    specialMove :: Marble -> Turn -> Turn
+    specialMove n (marbles, scores) = (newMarbles, rotateRight (update newScore scores))
       where
-        rotatedMarbles = rotNL 7 marbles
-        removedMarble = fromJust (focus rotatedMarbles)
-        newMarbles = removeR rotatedMarbles
-        newScore = (fromJust (focus scores)) + removedMarble + n
+        rotatedMarbles = rotateNLeft 7 marbles
+        removedMarble = current rotatedMarbles
+        newMarbles = removeAfter rotatedMarbles
+        newScore = (current scores) + removedMarble + n
 
-highscore :: Int -> Int -> Int
+highscore :: Players -> Marble -> Score
 highscore players lastMarble = maximum (toList scores)
   where
     scores = (snd (gameplayFor players lastMarble))
