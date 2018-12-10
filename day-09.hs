@@ -1,7 +1,6 @@
 import System.Environment
 import Helpers.Circle
 
-
 type Gameplay = Players -> Turn
 type Players = Int
 type Turn = (MarblesCircle, ScoresCircle)
