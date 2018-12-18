@@ -1,12 +1,17 @@
 import System.Environment
-import Control.Monad (mapM_, forM_)
+import System.Console.ANSI
+import Control.Monad (mapM_, forM_, foldM_)
+import Data.Maybe
 import Data.Array (Array, bounds, (!), elems)
 import Data.Array.ST (runSTArray)
 import Data.Array.MArray (newArray, writeArray)
+import Control.Concurrent.Thread.Delay (delay)
+import qualified Data.Map.Lazy as Map
 
 type Type = Char
 type LumberCollection = Array Position Type
 type Position = (Int, Int)
+type DescriptorsMap = Map.Map Int [(Int, LumberCollection)]
 
 parseInput :: String -> LumberCollection
 parseInput s = canvasArr
@@ -82,8 +87,41 @@ adjacent area (x,y) = map (area !) poss
     poss' = [(x,y-1), (x+1,y-1), (x+1,y), (x+1,y+1), (x,y+1), (x-1,y+1), (x-1,y), (x-1,y-1)]
     poss = filter (\(x',y') -> x' >= 0 && x' <= w && y' >= 0 && y' <= h) poss'
 
+delayMilis :: Integer -> IO ()
+delayMilis n = delay (n*1000)
+
+findTicksLoop :: LumberCollection -> (Int, [Int])
+findTicksLoop area = findTicksLoop' area 0 Map.empty
+  where
+    findTicksLoop' :: LumberCollection -> Int -> DescriptorsMap -> (Int, [Int])
+    findTicksLoop' area n dmap = if isJust from
+      then (fst (fromJust from), resourceValueListFromTo (snd (fromJust from)) (fst (fromJust from)) n)
+      else findTicksLoop' (nextTick area) (n+1) nextDmap
+        where
+          val = resourceValue area
+          prevs = Map.findWithDefault [] val dmap
+          from = findSameArea area prevs
+          nextDmap = Map.insert val ((n,area):prevs) dmap
+
+    findSameArea :: LumberCollection -> [(Int, LumberCollection)] -> Maybe (Int, LumberCollection)
+    findSameArea a [] = Nothing
+    findSameArea a ((i,a'):as) = if a == a' then Just (i,a') else findSameArea a as
+
+    resourceValueListFromTo :: LumberCollection -> Int -> Int -> [Int]
+    resourceValueListFromTo ar n m
+        | n == m    = []
+        | otherwise = (resourceValue ar) : (resourceValueListFromTo (nextTick ar) (n+1) m)
+
+bigNthResourceValue :: LumberCollection -> Int -> Int
+bigNthResourceValue area n = values !! m
+  where
+    (first, values) = findTicksLoop area
+    len = length values
+    m = (n - first) `mod` len
+
 main :: IO ()
 main = do
   s <- readFile "input/day-18.input"
   let area = parseInput s
   print $ resourceValue (nextNTicks 10 area)
+  print $ bigNthResourceValue area 1000000000
