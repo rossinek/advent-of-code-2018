@@ -1,6 +1,6 @@
 module Helpers.Program (
-  Program,
-  Action,
+  Program (..),
+  Action (..),
   Registers,
   RegIP,
   Command,
@@ -25,7 +25,7 @@ data Program = Exitted Registers | Program [Command] (Int, RegIP, Registers) [Co
 data Action = Addr | Addi | Mulr | Muli
             | Banr | Bani | Borr | Bori
             | Setr | Seti | Gtir | Gtri
-            | Gtrr | Eqir | Eqri | Eqrr deriving (Eq, Show)
+            | Gtrr | Eqir | Eqri | Eqrr | Null deriving (Eq, Show)
 type Registers = [Int]
 type RegIP = Int
 type Command = (Action, Int, Int, Int)
