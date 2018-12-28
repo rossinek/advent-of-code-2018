@@ -16,6 +16,9 @@ type UnitsMap = Map.Map Position Unit
 type Graves = Set.Set Position
 
 type Unit = (UnitType, HitPoints)
+type ElfAttackPower = Int
+
+data RoundState = Round UnitsMap Graves | Finished UnitsMap Graves deriving Show
 
 initialHP :: Int
 initialHP = 200
@@ -51,80 +54,125 @@ mapsToStrings wm um = map (\y -> (strLine y) ++ "  " ++ (show (lineUnits y))) yC
 drawMaps :: WallsMap -> UnitsMap -> IO ()
 drawMaps wm um = mapM_ putStrLn $ mapsToStrings wm um
 
-nextRound :: WallsMap -> UnitsMap -> (UnitsMap, Graves)
-nextRound walls unitsMap = foldl turn (unitsMap, Set.empty) unitsQueue
+nextRound :: ElfAttackPower -> WallsMap -> UnitsMap -> RoundState
+nextRound elfAttack walls unitsMap = foldl turn (Round unitsMap Set.empty) unitsQueue
   where
     unitsQueue = Map.toAscList unitsMap
-    turn :: (UnitsMap, Graves) -> (Position, Unit) -> (UnitsMap, Graves)
-    turn (units, graves) (pos, unit)
-      | pos `Set.member` graves = (units, graves)
-      | otherwise               = uncurry attack (move (pos, unit) (units, graves))
-    move :: (Position, Unit) -> (UnitsMap, Graves) -> ((Position, Unit), (UnitsMap, Graves))
-    move (pos, unit) (umap, graves)
-      | (not . null) (targetsInRegion walls umap (pos, unit)) = ((pos, unit), (umap, graves))
+    turn :: RoundState -> (Position, Unit) -> RoundState
+    turn rs@(Finished units graves) (pos, unit) = rs
+    turn roundstate@(Round _ graves) (pos, unit)
+      | pos `Set.member` graves = roundstate
+      | otherwise               = uncurry attack (uncurry move (updateRoundState (pos, unit) roundstate))
+    updateRoundState :: (Position, Unit) -> RoundState -> ((Position, Unit), RoundState)
+    updateRoundState us rs@(Finished _ _) = (us,rs)
+    updateRoundState us@(pos, _) roundstate@(Round umap graves) = if combatFinished roundstate
+      then (us, Finished umap graves)
+      else ((pos, umap Map.! pos), roundstate)
+    move :: (Position, Unit) -> RoundState -> ((Position, Unit), RoundState)
+    move (pos, unit) rs@(Finished _ _) = ((pos, unit), rs)
+    move (pos, unit@(ut,_)) roundstate@(Round umap graves)
+      | anyTargetInRegion walls umap ut pos = ((pos, unit), roundstate)
       | otherwise = if isNothing fstep
-        then ((pos, unit), (umap, graves))
-        else ((fromJust fstep, unit), (Map.insert (fromJust fstep) unit (Map.delete pos umap), graves))
+        then ((pos, unit), roundstate)
+        else ((fromJust fstep, unit), Round (Map.insert (fromJust fstep) unit (Map.delete pos umap)) graves)
           where
             fstep = firstStep walls umap (pos, unit)
-    attack :: (Position, Unit) -> ((UnitsMap, Graves)) -> (UnitsMap, Graves)
-    attack (pos, unit) (umap, graves) = if null targets
-      then (umap, graves)
-      else (umap', graves')
+    attack :: (Position, Unit) -> RoundState -> RoundState
+    attack (pos, unit) rs@(Finished _ _) = rs
+    attack (pos, unit) roundstate@(Round umap graves) = if null targets
+      then roundstate
+      else Round umap' graves'
         where
           targets = targetsInRegion walls umap (pos, unit)
-          (weakestPos, (weakestType, weakestHp)) = minimumOn (snd . snd) targets
-          weakestHp' = weakestHp - 3
-          isKilled = weakestHp' <= 0
+          (weakestPos, (weakestType, weakestHp)) = minimumOn (\(pp, (_,php)) -> (php, pp)) targets
+          weakestHp' = weakestHp - (if weakestType == 'G' then elfAttack else 3)
+          isKilled = weakestHp' < 1
           umap' = if isKilled
             then Map.delete weakestPos umap
             else Map.insert weakestPos (weakestType, weakestHp') umap
           graves' = if isKilled then Set.insert weakestPos graves else graves
 
-combatFinished :: UnitsMap -> Bool
-combatFinished umap = let ((ut,_):uts) = Map.elems umap in not (hasTarget ut uts)
+combatFinished :: RoundState -> Bool
+combatFinished (Round umap _) = let ((ut,_):uts) = Map.elems umap in not (hasTarget ut uts)
 
 hasTarget :: UnitType -> [Unit] -> Bool
 hasTarget utype [] = False
 hasTarget utype ((ut,_):uts) = utype /= ut || hasTarget utype uts
 
 combat :: WallsMap -> UnitsMap -> (Int, Int, UnitsMap)
-combat walls unitsMap = combat' walls unitsMap (-1)
+combat walls unitsMap = combat' walls unitsMap 0
 
 combat' :: WallsMap -> UnitsMap -> Int -> (Int, Int, UnitsMap)
-combat' walls unitsMap n = if combatFinished unitsMap
-  then (n, sum (map snd (Map.elems unitsMap)), unitsMap)
-  else combat' walls (fst (nextRound walls unitsMap)) (n+1)
+combat' walls unitsMap n = if roundFinished nextR
+  then (n, sum (map snd (Map.elems (roundUnits nextR))), roundUnits nextR)
+  else combat' walls (roundUnits nextR) (n+1)
+    where
+      nextR = nextRound 3 walls unitsMap
+
+roundUnits :: RoundState -> UnitsMap
+roundUnits (Round unitsMap _) = unitsMap
+roundUnits (Finished unitsMap _) = unitsMap
+
+roundGraves :: RoundState -> Graves
+roundGraves (Round _ graves) = graves
+roundGraves (Finished _ graves) = graves
+
+roundFinished :: RoundState -> Bool
+roundFinished (Finished _ _) = True
+roundFinished _ = False
+
+minLosslessCombat :: WallsMap -> UnitsMap -> (Int, Int, Int, UnitsMap)
+minLosslessCombat walls initialUnitsMap = minLosslessCombat' initialUnitsMap 4 0
+  where
+    minLosslessCombat' :: UnitsMap -> ElfAttackPower -> Int -> (Int, Int, Int, UnitsMap)
+    minLosslessCombat' unitsMap elfAttack n = if elfDied graves unitsMap
+      then minLosslessCombat' initialUnitsMap (elfAttack+1) 0
+      else if roundFinished nround
+        then (elfAttack, n, sum (map snd (Map.elems unitsMap')), unitsMap')
+        else minLosslessCombat' unitsMap' elfAttack (n+1)
+          where
+            nround = nextRound elfAttack walls unitsMap
+            unitsMap' = roundUnits nround
+            graves = roundGraves nround
+
+elfDied :: Graves -> UnitsMap -> Bool
+elfDied graves unitsMap = (not . Set.null) $ Set.filter (\pos -> (fst (unitsMap Map.! pos)) == 'E') graves
 
 firstStep :: WallsMap -> UnitsMap -> (Position, Unit) -> Maybe Position
-firstStep walls umap (initPos, (unitType, hp)) = firstStep' (Heap.singleton (0, initPos, initPos)) Map.empty
+firstStep walls umap (initPos, (unitType, _)) = if isNothing cenem
+  then Nothing
+  else minClosestPos
   where
-    firstStep' :: Heap.MinHeap (Int, Position, Position) -> Map.Map Position Position -> Maybe Position
-    firstStep' heap visited
-      | Heap.isEmpty heap = Nothing
-      | otherwise = if hpos `Map.member` visited
-        then firstStep' htail visited
-        else if isUnit && hpos /= initPos
-          then if isTargetUnit
-            then Just (pathFirstStep (hpos, hparent) visited)
-            else firstStep' htail visited'
-          else firstStep' htail' visited'
-            where
-              (plen, hpos, hparent) = fromJust (Heap.viewHead heap)
-              maybeUnit = (umap Map.!? hpos)
-              isUnit = isJust maybeUnit
-              isTargetUnit = isUnit && (fst (fromJust maybeUnit) /= unitType)
-              visited' = Map.insert hpos hparent visited
-              htail = Heap.drop 1 heap
-              newPools = neighborhood walls hpos
-              htail' = foldl (\h pos -> Heap.insert (plen+1, pos, hpos) h) htail (neighborhood walls hpos)
+    cenem = closestTargetSibling (Heap.singleton (0,initPos)) Set.empty (anyTargetInRegion walls umap unitType)
+    minClosestPos = closestTargetSibling (Heap.singleton (0, fromJust cenem)) Set.empty (isNeighbor initPos)
 
-pathFirstStep :: (Position, Position) -> Map.Map Position Position -> Position
-pathFirstStep (pos, parent) visited = if parent == nextParent
-  then pos
-  else pathFirstStep (parent, nextParent) visited
-    where
-      nextParent = visited Map.! parent
+    closestTargetSibling :: Heap.MinHeap (Int, Position) -> Set.Set Position -> (Position -> Bool) -> Maybe Position
+    closestTargetSibling heap visited isTargetSibling
+      | Heap.isEmpty heap = Nothing
+      | otherwise = if hpos `Set.member` visited
+        then closestTargetSibling htail visited isTargetSibling
+        else if hpos /= initPos && isUnit
+          then closestTargetSibling htail visited' isTargetSibling
+          else if isTargetSibling hpos
+            then Just hpos
+            else closestTargetSibling htail' visited' isTargetSibling
+        where
+          (plen, hpos) = fromJust (Heap.viewHead heap)
+          maybeUnit = (umap Map.!? hpos)
+          isUnit = isJust maybeUnit
+          visited' = Set.insert hpos visited
+          htail = Heap.drop 1 heap
+          newPools = neighborhood walls hpos
+          htail' = foldl (\h pos -> Heap.insert (plen+1, pos) h) htail (neighborhood walls hpos)
+
+anyTargetInRegion :: WallsMap -> UnitsMap -> UnitType -> Position -> Bool
+anyTargetInRegion walls umap unitType pos = anyTargetInRegion' (neighborhood walls pos)
+  where
+    anyTargetInRegion' :: [Position] -> Bool
+    anyTargetInRegion' [] = False
+    anyTargetInRegion' (pos:pss) = let maybeUnit = (umap Map.!? pos) in if isNothing maybeUnit
+      then anyTargetInRegion' pss
+      else (fst (fromJust maybeUnit) /= unitType) || anyTargetInRegion' pss
 
 targetsInRegion :: WallsMap -> UnitsMap -> (Position, Unit) -> [(Position, Unit)]
 targetsInRegion walls umap (pos, (ut,_)) = filter (\(_,(ut',_)) -> ut' /= ut) (foldl maybeShiftWithPos [] (neighborhood walls pos))
@@ -140,6 +188,9 @@ neighborhood walls (y,x) = filter notWall (filter inBounds [(y-1,x), (y,x-1), (y
     inBounds (y,x) = y >= miny && y <= maxy && x >= minx && x <= maxx
     notWall :: Position -> Bool
     notWall pos = not (walls ! pos)
+
+isNeighbor :: Position -> Position -> Bool
+isNeighbor (y,x) (y',x') = ((abs (y - y')) + (abs (x - x'))) == 1
 
 maybeShift :: Maybe a -> [a] -> [a]
 maybeShift Nothing x = x
@@ -157,4 +208,6 @@ main = do
   let (n,hps,finished) = combat wallMap unitsMap
   -- drawMaps wallMap finished
   print (n * hps)
-
+  let (elfAttack, n',hps',finished') = minLosslessCombat wallMap unitsMap
+  -- drawMaps wallMap finished'
+  print (n' * hps')
