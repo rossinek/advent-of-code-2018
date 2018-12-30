@@ -17,6 +17,10 @@ type Immunities = Set.Set AttackType
 type GroupID = Int
 data GroupType = Immune | Infection deriving (Eq, Show)
 
+data Combat = Fighting (Map.Map GroupID UnitGroup)
+            | Impasse (Map.Map GroupID UnitGroup)
+            | Finished (Map.Map GroupID UnitGroup) deriving Show
+
 parseInput :: String -> Map.Map GroupID UnitGroup
 parseInput s = Map.fromList (map (\g -> (gID g, g)) unitGroups)
   where
@@ -67,6 +71,8 @@ gID :: UnitGroup -> GroupID
 gID = gInitiative
 gUpdateQuantity :: UnitGroup -> Quantity -> UnitGroup
 gUpdateQuantity (gt, q, hp, ad, at, i, ws, is) q' = (gt, q', hp, ad, at, i, ws, is)
+gBoostAttackDamage :: UnitGroup -> Int -> UnitGroup
+gBoostAttackDamage (gt, q, hp, ad, at, i, ws, is) boost = (gt, q, hp, ad + boost, at, i, ws, is)
 
 attackDamage :: UnitGroup -> UnitGroup -> AttackDamage
 attackDamage attacker defender = if (gAttackType attacker) `Set.member` (gImmunities defender)
@@ -78,8 +84,16 @@ attackDamage attacker defender = if (gAttackType attacker) `Set.member` (gImmuni
 attack :: UnitGroup -> UnitGroup -> UnitGroup
 attack attacker defender = gUpdateQuantity defender ((gQuantity defender) - ((attackDamage attacker defender) `div` (gHP defender)))
 
-fight :: Map.Map GroupID UnitGroup -> Map.Map GroupID UnitGroup
-fight groups = attacking groups (targetSelection groups)
+fight :: Combat -> Combat
+fight c = if effect
+  then Fighting afterAttacks
+  else if anyOpponents afterAttacks
+    then Impasse afterAttacks
+    else Finished afterAttacks
+  where
+    groups = combatGroups c
+    selections = targetSelection groups
+    (afterAttacks, effect) = attacking groups selections
 
 targetSelection :: Map.Map GroupID UnitGroup -> Map.Map GroupID GroupID
 targetSelection groups
@@ -87,26 +101,30 @@ targetSelection groups
   where
     groupsList = Map.elems groups
     selectTarget :: Map.Map GroupID GroupID -> UnitGroup -> Map.Map GroupID GroupID
-    selectTarget selections group = if null opponents
+    selectTarget selections group = if null opponents || maxOpponentDamage <= 0
       then selections
       else Map.insert (gID group) (gID (maximumOn (\g -> (attackDamage group g, gEffectivePower g, gInitiative g)) opponents)) selections
       where
         opponents = filter (\g -> (gType g /= gType group) && not ((gID g) `elem` (Map.elems selections))) groupsList
+        maxOpponent = maximumOn (\g -> (attackDamage group g, gEffectivePower g, gInitiative g)) opponents
+        maxOpponentDamage = attackDamage group maxOpponent
 
-attacking :: Map.Map GroupID UnitGroup -> Map.Map GroupID GroupID -> Map.Map GroupID UnitGroup
-attacking groupsMap selection = foldl attackTarget groupsMap (reverse (sortOn gInitiative groupsList))
+attacking :: Map.Map GroupID UnitGroup -> Map.Map GroupID GroupID -> (Map.Map GroupID UnitGroup, Bool)
+attacking groupsMap selection = foldl attackTarget (groupsMap, False) (reverse (sortOn gInitiative groupsList))
   where
     groupsList = Map.elems groupsMap
-    attackTarget :: Map.Map GroupID UnitGroup -> UnitGroup -> Map.Map GroupID UnitGroup
-    attackTarget groups g = if isNothing group || isNothing selectedTargetID
-      then groups
+    attackTarget :: (Map.Map GroupID UnitGroup, Bool) -> UnitGroup -> (Map.Map GroupID UnitGroup, Bool)
+    attackTarget (groups, effect) g = if isNothing group || isNothing selectedTargetID || not effect'
+      then (groups, effect)
       else if gQuantity targetAfterAttack <= 0
-        then Map.delete (gID targetAfterAttack) groups
-        else Map.insert (gID targetAfterAttack) targetAfterAttack groups
+        then (Map.delete (gID targetAfterAttack) groups, True)
+        else (Map.insert (gID targetAfterAttack) targetAfterAttack groups, True)
       where
         group = groups Map.!? (gID g)
         selectedTargetID = selection Map.!? (gID (fromJust group))
-        targetAfterAttack = attack (fromJust group) (groups Map.! (fromJust selectedTargetID))
+        targetBeforeAttack = groups Map.! (fromJust selectedTargetID)
+        targetAfterAttack = attack (fromJust group) targetBeforeAttack
+        effect' = gQuantity targetBeforeAttack /= gQuantity targetAfterAttack
 
 anyOpponents :: Map.Map GroupID UnitGroup -> Bool
 anyOpponents groups = hasOpponent (gType (head glist)) (tail glist)
@@ -116,17 +134,48 @@ anyOpponents groups = hasOpponent (gType (head glist)) (tail glist)
     hasOpponent gt [] = False
     hasOpponent gt (u:us) = if gt /= gType u then True else hasOpponent gt us
 
-combat :: Map.Map GroupID UnitGroup -> Map.Map GroupID UnitGroup
-combat groups = if anyOpponents groups
-  then combat (fight groups)
-  else groups
+combat :: Combat -> Combat
+combat c@(Impasse _) = c
+combat c@(Finished _) = c
+combat c = combat (fight c)
 
-unitsCount :: Map.Map GroupID UnitGroup -> Quantity
-unitsCount groups = sum (map gQuantity (Map.elems groups))
+combatGroups :: Combat -> Map.Map GroupID UnitGroup
+combatGroups (Fighting groups) = groups
+combatGroups (Impasse groups) = groups
+combatGroups (Finished groups) = groups
 
+unitsCount :: Combat -> Quantity
+unitsCount combat = sum (map gQuantity (Map.elems (combatGroups combat)))
+
+applyBoost :: Map.Map GroupID UnitGroup -> Int -> Map.Map GroupID UnitGroup
+applyBoost groups boost = Map.map (addReindeerBoost boost) groups
+
+addReindeerBoost :: Int -> UnitGroup -> UnitGroup
+addReindeerBoost boost g  | gType g == Immune  = gBoostAttackDamage g boost
+                          | otherwise          = g
+
+findMinAccepted :: (Int -> (Bool, a)) -> (Int, a)
+findMinAccepted isAccepted = binFindMinAccepted isAccepted ((fst highAccepted) `div` 2) highAccepted
+  where
+    highAccepted = head [ ((2^k), a) | k <- [0..], (b, a) <- [isAccepted (2^k)], b ]
+
+binFindMinAccepted :: (Int -> (Bool, a)) -> Int -> (Int, a) -> (Int, a)
+binFindMinAccepted isAccepted low high
+      | (fst high) - low <= 0 = error "Incorrect arguments"
+      | (fst high) - low == 1 = high
+      | fst mid               = binFindMinAccepted isAccepted low (midI, snd mid)
+      | otherwise             = binFindMinAccepted isAccepted midI high
+  where
+    midI = low + (((fst high) - low) `div` 2)
+    mid = isAccepted midI
+
+immuneWins :: Combat -> (Bool, Combat)
+immuneWins c@(Impasse _) = (False, c)
+immuneWins c@(Finished groups) = (gType (head (Map.elems groups)) == Immune, c)
 
 main :: IO ()
 main = do
   s <- readFile "input/day-24.input"
   let input = parseInput s
-  print $ unitsCount (combat input)
+  print $ unitsCount (combat (Fighting input))
+  print $ unitsCount (snd (findMinAccepted (\boost -> immuneWins (combat (Fighting (applyBoost input boost))))))
